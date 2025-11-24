@@ -11,9 +11,11 @@ namespace Raknah.Controllers
     public class ReservationController : ControllerBase
     {
         private readonly IReservationServices _reservationServices;
-        public ReservationController(IReservationServices reservationServices)
+        private readonly GateService _gateService;
+        public ReservationController(IReservationServices reservationServices, GateService gateService)
         {
             _reservationServices = reservationServices;
+            _gateService = gateService;
         }
 
         [HttpPost]
@@ -21,24 +23,23 @@ namespace Raknah.Controllers
         {
 
             var result = await _reservationServices.CreateReservationAsync(request, User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
-            return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+            return result.IsSuccess ? CreatedAtAction(nameof(GetPendingReservations), new { id = result.Value.Id }, result.Value) : result.ToProblem();
         }
 
-        [HttpDelete("{reservationId}")]
+        [HttpPost("cancel/{reservationId}")]
         public async Task<IActionResult> CancelReservationAsync(int reservationId)
         {
             var result = await _reservationServices.CancelReservationAsync(reservationId);
             return result.IsSuccess ? Ok() : result.ToProblem();
 
         }
-        [HttpPost("OpenGate")]
-        public async Task<IActionResult> OpenGateAsync()
-        {
+        //[HttpPost("OpenGate")]
+        //public async Task<IActionResult> OpenGateAsync()
+        //{
 
-
-            var result = await _reservationServices.OpenGateAsync(User.GetUserId());
-            return result.IsSuccess ? Ok() : result.ToProblem();
-        }
+        //    var result = await _reservationServices.OpenGateAsync(User.GetUserId());
+        //    return result.IsSuccess ? Ok() : result.ToProblem();
+        //}
 
         [HttpGet("pending")]
         public async Task<IActionResult> GetPendingReservations()
@@ -82,6 +83,15 @@ namespace Raknah.Controllers
         {
             var result = await _reservationServices.GetCompletedAndCanceledReservations(User.GetUserId());
             return result.IsFailure ? result.ToProblem() : Ok(result.Value);
+        }
+
+        [HttpPost("open-gate")]
+        public async Task<IActionResult> OpenGate()
+        {
+
+            var result = await _gateService.OpenGateAsync(User.GetUserId());
+
+            return result.IsSuccess ? Ok() : result.ToProblem();
         }
 
     }

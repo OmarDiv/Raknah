@@ -23,8 +23,6 @@ public class AccountController(IUserService userService) : ControllerBase
     {
         var result = await _userService.UpdateProfileAsync(User.FindFirstValue(ClaimTypes.NameIdentifier)!, request);
         return result.IsSuccess ? Ok() : result.ToProblem();
-
-
     }
     [HttpPost("change-password")]
     public async Task<IActionResult> ChangePassword(ChangePasswordRequest request, CancellationToken cancellationToken = default)
