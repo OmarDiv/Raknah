@@ -1,24 +1,22 @@
 ﻿using Hangfire;
-using Microsoft.AspNetCore.Identity.UI.Services;
+
 using Raknah.Consts.Errors;
 using Raknah.Extensions;
 using Raknah.Persistence;
 using System.Linq.Expressions;
-using System.Text;
-
 namespace Raknah.Services
 {
     public class ResservationService(ApplicationDbContext context,
         IHttpContextAccessor httpContextAccessor,
         HttpClient httpClient,
-        IEmailSender emailSender
+        IEmailSendar emailSender
             ) : IReservationServices
     {
         private readonly ApplicationDbContext _context = context;
         private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
         private readonly HttpClient _httpClient = httpClient;
-        private readonly IEmailSender _emailSender = emailSender;
-        private readonly int _timeoutInMinutes = 60;
+        private readonly IEmailSendar _emailSender = emailSender;
+        private readonly int _timeoutInMinutes = 15;
 
 
         public async Task<Result> CancelReservationAsync(int reservationId)
@@ -98,12 +96,12 @@ namespace Raknah.Services
             // Schedule a background job to cancel if not arrived in 15 minutes
             BackgroundJob.Schedule(
                () => ReminderReservation(reservation.Id),
-               TimeSpan.FromSeconds(_timeoutInMinutes - 5)
+               TimeSpan.FromMinutes(_timeoutInMinutes - 5)
             );
 
             BackgroundJob.Schedule(
                 () => CancelReservationIfNotArrivedAsync(reservation.Id),
-                TimeSpan.FromSeconds(_timeoutInMinutes)
+                TimeSpan.FromMinutes(_timeoutInMinutes)
             );
 
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
@@ -119,50 +117,50 @@ namespace Raknah.Services
             return Result.Success(reservation.Adapt<ReservationResponse>());
         }
 
-        public async Task<Result> OpenGateAsync(string UserId)
-        {
-            var reservation = await _context.Reservations
-                .Where(u => u.UserId == UserId && u.Status == ReservationStatus.Pending && !u.IsGateOpened)
-                .FirstOrDefaultAsync();
+        //public async Task<Result> OpenGateAsync(string UserId)
+        //{
+        //    var reservation = await _context.Reservations
+        //        .Where(u => u.UserId == UserId && u.Status == ReservationStatus.Pending && !u.IsGateOpened)
+        //        .FirstOrDefaultAsync();
 
-            if (reservation == null)
-                return Result.Failure(ReservationError.NotFound);
+        //    if (reservation == null)
+        //        return Result.Failure(ReservationError.NotFound);
 
-            try
-            {
-                string esp32Url = "http://192.168.1.50/data";
-                var jsonData = "{ \"message\": \"Open Door\" }";
-                var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
+        //    try
+        //    {
+        //        string esp32Url = "http://192.168.1.50/data";
+        //        var jsonData = "{ \"message\": \"Open Door\" }";
+        //        var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
 
-                HttpResponseMessage response = await _httpClient.PostAsync(esp32Url, content);
+        //        HttpResponseMessage response = await _httpClient.PostAsync(esp32Url, content);
 
-                if (!response.IsSuccessStatusCode)
-                    return Result.Failure(ReservationError.EspFaliure);
+        //        if (!response.IsSuccessStatusCode)
+        //            return Result.Failure(ReservationError.EspFaliure);
 
-                string responseBody = await response.Content.ReadAsStringAsync();
+        //        string responseBody = await response.Content.ReadAsStringAsync();
 
-                if (responseBody.Contains("Gate opened", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Update reservation status if needed here
-                    reservation.IsGateOpened = true;
-                    _context.SaveChanges();
-                    return Result.Success();
-                }
-                else if (responseBody.Contains("No car", StringComparison.OrdinalIgnoreCase))
-                {
-                    return Result.Failure(ReservationError.NoCarDetected);
-                }
-                else
-                {
-                    return Result.Failure(ReservationError.ErrorFromGate);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"An error occurred: {ex.Message}");
-                return Result.Failure(ReservationError.EspFaliure);
-            }
-        }
+        //        if (responseBody.Contains("Gate opened", StringComparison.OrdinalIgnoreCase))
+        //        {
+        //            // Update reservation status if needed here
+        //            reservation.IsGateOpened = true;
+        //            _context.SaveChanges();
+        //            return Result.Success();
+        //        }
+        //        else if (responseBody.Contains("No car", StringComparison.OrdinalIgnoreCase))
+        //        {
+        //            return Result.Failure(ReservationError.NoCarDetected);
+        //        }
+        //        else
+        //        {
+        //            return Result.Failure(ReservationError.ErrorFromGate);
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Console.WriteLine($"An error occurred: {ex.Message}");
+        //        return Result.Failure(ReservationError.EspFaliure);
+        //    }
+        //}
 
         public async Task CancelReservationIfNotArrivedAsync(int reservationId)
         {
@@ -215,63 +213,37 @@ namespace Raknah.Services
         }
 
         public async Task<Result<ActiveReservationResponse>> GetActiveReservations(string userId)
-            => await GetStatusAsync<ActiveReservationResponse>(userId, x => x.Status == ReservationStatus.Active);
-
+            => await GetStatusAsync<ActiveReservationResponse>(userId, x => x.Status == ReservationStatus.Active, true);
         public async Task<Result<PendingAndCanceledReservationResponse>> GetPendingReservations(string userId)
-              => await GetStatusAsync<PendingAndCanceledReservationResponse>(userId, x => x.Status == ReservationStatus.Pending);
-
+              => await GetStatusAsync<PendingAndCanceledReservationResponse>(userId, x => x.Status == ReservationStatus.Pending, true);
         public async Task<Result<List<CompletedAndCanceledReservationResponse>>> GetCompletedReservations(string userId)
             => await GetStatusAsync<List<CompletedAndCanceledReservationResponse>>(userId, x => x.Status == ReservationStatus.Inactive);
-
         public async Task<Result<List<PendingAndCanceledReservationResponse>>> GetCanceledReservations(string userId)
             => await GetStatusAsync<List<PendingAndCanceledReservationResponse>>(userId, x => x.Status == ReservationStatus.Canceled);
-
         public async Task<Result<List<CompletedAndCanceledReservationResponse>>> GetCompletedAndCanceledReservations(string userId)
             => await GetStatusAsync<List<CompletedAndCanceledReservationResponse>>(userId, x => x.Status == ReservationStatus.Canceled || x.Status == ReservationStatus.Inactive);
         public async Task<Result<List<PendingAndActiveReservationResponse>>> GetPendingOrActiveReservations(string userId)
           => await GetStatusAsync<List<PendingAndActiveReservationResponse>>(userId, x => x.Status == ReservationStatus.Pending || x.Status == ReservationStatus.Active);
 
-        public async Task<Result<T>> GetStatusAsync<T>(string userId, Expression<Func<Reservation, bool>> status, int page = 1, int pageSize = 10, bool isSingle = false)
+        public async Task<Result<T>> GetStatusAsync<T>(string userId, Expression<Func<Reservation, bool>> status, bool single = false)
         {
-            var query = _context.Reservations
-                .Where(r => r.UserId == userId)
-                .Where(status)
-                .Include(r => r.ParkingSpot)
-                .OrderBy(r => r.StartTimeOfReservation); // ترتيب حسب تاريخ الحجز
+            var statusReservation = _context.Reservations
+               .Where(r => r.UserId == userId)
+               .Where(status)
+               .AsNoTracking()
+               .Include(r => r.ParkingSpot);
 
-            if (isSingle)
-            {
-                // إرجاع عنصر واحد فقط
-                var singleItem = await query.FirstOrDefaultAsync();
-                if (singleItem == null)
-                    return Result.Failure<T>(ReservationError.NotFound);
+            object data;
 
-                return Result.Success(singleItem.Adapt<T>());
-            }
+            if (single)
+                data = await statusReservation.FirstOrDefaultAsync();
             else
-            {
-                // إرجاع قائمة مع Pagination
-                var totalItems = await query.CountAsync();
-                var data = await query
-                    .Skip((page - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToListAsync();
+                data = await statusReservation.OrderByDescending(x=>x.Id).ToListAsync();
 
-                if (!data.Any())
-                    return Result.Failure<T>(ReservationError.NotFound);
+            if (data is null || (data is List<Reservation> list && !list.Any()))
+                return Result.Failure<T>(ReservationError.NotFound);
 
-                var result = new PaginatedResult<T>
-                {
-                    Items = data.Adapt<List<T>>(),
-                    TotalItems = totalItems,
-                    Page = page,
-                    PageSize = pageSize
-                };
-
-                return Result.Success(result.Adapt<T>());
-            }
+            return Result.Success(data.Adapt<T>());
         }
-
-
     }
 }

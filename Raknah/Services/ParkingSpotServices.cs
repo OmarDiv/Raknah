@@ -1,16 +1,13 @@
 ﻿using Raknah.Consts.Errors;
-﻿using Microsoft.AspNetCore.Identity.UI.Services;
 using Raknah.Extensions;
 using Raknah.Persistence;
-using Microsoft.AspNetCore.Mvc;
-
 namespace Raknah.Services
 {
     public class ParkingSpotServices(ApplicationDbContext context,
-        IEmailSender emailSender) : IParkingSpotServices
+        IEmailSendar emailSender) : IParkingSpotServices
     {
         private readonly ApplicationDbContext _context = context;
-        private readonly IEmailSender _emailSender = emailSender;
+        private readonly IEmailSendar _emailSender = emailSender;
         public async Task<Result<IEnumerable<ParkingSpot>>> GetParkingSpotsAsync()
         {
             IEnumerable<ParkingSpot> result = await _context.ParkingSpots.ToListAsync();
@@ -53,7 +50,7 @@ namespace Raknah.Services
                          {
                             { "{{FullName}}", reservation.User!.FullName  },
                             { "{{CarNumber}}",  reservation.CarNumber},
-                            { "{{ParkingSpotName}}", current.Name },    
+                            { "{{ParkingSpotName}}", current.Name },
                             { "{{StartTimeOfParking}}", reservation.StartTimeOfParking.ToString()! },
                             { "{{EndTimeOfParking}}", reservation.EndTimeOfParking.ToString()! },
                             { "{{Duration}}", reservation.Duration?.ToString(@"hh\:mm\:ss")!},

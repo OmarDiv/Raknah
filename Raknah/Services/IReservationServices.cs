@@ -5,7 +5,7 @@
         public Task<Result> CancelReservationAsync(int reservationId);
         public Task CancelReservationIfNotArrivedAsync(int reservationId);
         public Task<Result<ReservationResponse>> CreateReservationAsync(ReservationRequest requeststring, string userId);
-        Task<Result> OpenGateAsync(string UserId);
+        //Task<Result> OpenGateAsync(string UserId);
 
         public Task<Result<PendingAndCanceledReservationResponse>> GetPendingReservations(string userId);
         public Task<Result<ActiveReservationResponse>> GetActiveReservations(string userId);

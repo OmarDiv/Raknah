@@ -1,19 +1,31 @@
-﻿using Microsoft.AspNetCore.Identity;
+﻿
+using Azure.Core;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json.Linq;
+using Raknah.Abstractions;
 using Raknah.Authentications;
 using Raknah.Consts.Errors;
 using Raknah.Contracts.Authentication;
+using Raknah.Extensions;
+using Raknah.Persistence;
+using Raknah.Services;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace Raknah.Services;
 
 public class AuthService(UserManager<ApplicationUser> userManager,
-    IJwtProvider jwtProvider) : IAuthService
+    IJwtProvider jwtProvider,
+    IEmailSendar emailSender
+    ) : IAuthService
 {
     private readonly UserManager<ApplicationUser> _userManager = userManager;
     private readonly IJwtProvider _jwtProvider = jwtProvider;
     private readonly int _refreshTokenExpires = 14;
-
-
+    private readonly IEmailSendar _emailSender = emailSender;
 
     public async Task<Result<AuthResponse>> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
@@ -41,7 +53,7 @@ public class AuthService(UserManager<ApplicationUser> userManager,
 
         await _userManager.UpdateAsync(user);
 
-        return Result.Success(new AuthResponse(user.FullName, user.Email!, token, expiresIn, refreshToken, refreshTokenExpiration));
+        return Result.Success( new AuthResponse(user.FullName, user.Email!, token, expiresIn, refreshToken, refreshTokenExpiration));
     }
     public async Task<Result<AuthResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
@@ -104,5 +116,94 @@ public class AuthService(UserManager<ApplicationUser> userManager,
     private string GenerateRefreshToken()
     {
         return Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+    }
+
+    public async Task<Result<string>> SendOtp(string email)
+    {
+        if (await _userManager.FindByEmailAsync(email) is not { } user)
+            return Result.Success("");
+
+        var result = await GenerateCodeAndToken(user);
+
+
+        await _emailSender.SendEmailAsync(email, "Your OTP Code", "OTP", new Dictionary<string, string>
+        {
+            { "{{otpCode}}", result.code! },
+        });
+
+        return Result.Success(result.token!);
+    }
+    public async Task<Result<string>> VerifyOtp(VerifyOtpDto request)
+    {
+        var data = Decode<OtpToken>(request.Token);
+
+        if (await _userManager.FindByEmailAsync(data!.Email) is not { } user)
+            return Result.Success("");
+
+        var otp = user?.PasswordResetOtps.FirstOrDefault(o => o.Code == request.Code && !o.IsExpired);
+
+        if (otp is null || otp.IsUsed || data.Expiration < DateTime.UtcNow || data.Code != request.Code)
+            return Result.Failure<string>(UserError.InvalidOrExpiredOTP);
+
+        otp.IsUsed = true;
+
+        var result = await GenerateCodeAndToken(user!);
+
+        return Result.Success(result.token!);
+
+    }
+    public async Task<Result> ResetPasswordAsync(ResetPasswordRequest request)
+    {
+        var data = Decode<OtpToken>(request.Token);
+
+        if (await _userManager.FindByEmailAsync(data!.Email) is not { } user)
+            return Result.Success();
+
+        var otp = user?.PasswordResetOtps.FirstOrDefault(o => o.Code == data.Code && !o.IsExpired);
+
+        if (otp is null || otp.IsUsed || data.Expiration < DateTime.UtcNow || otp.Code != data.Code)
+            return Result.Failure<string>(UserError.InvalidOrExpiredOTP);
+
+        otp.IsUsed = true;
+        await _userManager.UpdateAsync(user!);
+
+        var token = await _userManager.GeneratePasswordResetTokenAsync(user!);
+        var result = await _userManager.ResetPasswordAsync(user!, token, request.NewPassword);
+
+        return result.Succeeded ? Result.Success() : Result.Failure(UserError.InvalidCredentials);
+    }
+
+
+    private async Task<(string code, string token)> GenerateCodeAndToken(ApplicationUser user)
+    {
+        var code = new Random().Next(100000, 999999).ToString();
+        var expiration = DateTime.UtcNow.AddMinutes(5);
+
+        user.PasswordResetOtps.Add(new PasswordResetOtp()
+        {
+            Code = code,
+            Expiration = expiration
+        });
+
+        await _userManager.UpdateAsync(user);
+
+        var data = new OtpToken
+        {
+            UserId = user.Id,
+            Email = user.Email!,
+            Code = code,
+            Expiration = expiration
+        };
+
+        var json = JsonSerializer.Serialize(data);
+        var token = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+
+        return (code, token);
+    }
+
+    public T? Decode<T>(string token)
+    {
+        var json = Encoding.UTF8.GetString(Convert.FromBase64String(token));
+        return JsonSerializer.Deserialize<T>(json);
     }
 }
