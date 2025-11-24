@@ -20,7 +20,7 @@ public static class DependencyInjections
 {
     public static IServiceCollection RegisterServices(this IServiceCollection services, WebApplicationBuilder builder)
     {
-        services.Configure<EmailSetting>(builder.Configuration.GetSection("EmailSetting"));
+        services.Configure<SMTPOptions>(builder.Configuration.GetSection("EmailSetting"));
 
         services
             .AddProblemDetails()
@@ -33,7 +33,6 @@ public static class DependencyInjections
 
         services
            .AddHangFireConfig(builder)
-            .SerilogConfig(builder)
             .DbContextConfig(builder)
             .FluentValidationConfig()
             .MapsterConfig()
@@ -45,7 +44,7 @@ public static class DependencyInjections
             .AddScoped<IJwtProvider, JwtProvider>()
             .AddScoped<IParkingSpotServices, ParkingSpotServices>()
             .AddScoped<IReservationServices, ResservationService>()
-            .AddScoped<IEmailSender, EmailService>()
+            .AddScoped<IEmailSendar, EmailSender>()
             .AddTransient<IExceptionHandler, GlobalExceptionHandler>();
 
 
@@ -57,8 +56,12 @@ public static class DependencyInjections
 
         services.AddDbContext<ApplicationDbContext>(options =>
         {
-            options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+            options.UseSqlServer(
+                builder.Configuration.GetConnectionString("DefaultConnection"),
+                sqlOptions => sqlOptions.EnableRetryOnFailure()
+            );
         });
+
 
         services.AddIdentity<ApplicationUser, IdentityRole>()
             .AddEntityFrameworkStores<ApplicationDbContext>()
@@ -125,14 +128,5 @@ public static class DependencyInjections
         services.AddHangfireServer();
         return services;
     }
-    public static IServiceCollection SerilogConfig(this IServiceCollection services, WebApplicationBuilder builder)
-    {
-
-        builder.Host.UseSerilog((context, configuration) =>
-            configuration.ReadFrom.Configuration(context.Configuration)
-        );
-
-        return services;
-    }
-
+   
 }
